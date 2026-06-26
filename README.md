@@ -1,6 +1,7 @@
 # Bidirectional-Adaptive-LI-FI-System
 Advanced Bidirectional Li-Fi Communication System With Encryption, Adaptive Speed Control And Error Correction 
-Here is a narrative, coherent summary of the adaptive, bidirectional Li-Fi communication system project, based strictly on the provided report details and source files.
+
+![alt text](<WhatsApp Image 2026-06-24 at 11.16.22 PM.jpeg>)
 
 ---
 
