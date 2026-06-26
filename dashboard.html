@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Li-Fi Analytics V5 (Diagnostics)</title>
+<style>
+body { background-color: #0b0c10; color: #c5c6c7; font-family: 'Segoe UI', monospace; margin: 0; padding: 10px; display: flex; flex-direction: column; height: 98vh; overflow: hidden; }
+
+/* HEADER */
+header { border-bottom: 2px solid #45a29e; padding-bottom: 10px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+h1 { margin: 0; letter-spacing: 2px; color: #66fcf1; }
+
+.btn-group { display: flex; gap: 10px; }
+button { background: #45a29e; color: #0b0c10; border: none; padding: 8px 15px; font-weight: bold; cursor: pointer; border-radius: 4px; }
+button:hover { background: #66fcf1; }
+button.danger { background: #ff3333; color: white; }
+
+/* GRID LAYOUT */
+.grid { display: flex; gap: 15px; flex: 1; overflow: hidden; }
+
+/* LEFT PANEL (Metrics) */
+.metrics-card { width: 320px; background: #1f2833; padding: 15px; border-radius: 8px; display: flex; flex-direction: column; gap: 10px; }
+
+.metric-box { text-align: center; background: #0b0c10; padding: 10px; border-radius: 5px; border: 1px solid #2d3842; }
+.metric-val { font-size: 1.8rem; font-weight: bold; color: #fff; }
+.metric-label { font-size: 0.75rem; color: #888; letter-spacing: 1px; }
+
+#roleIndicator { font-size: 1.2rem; color: #ffff00; font-weight: bold; text-align: center; padding: 5px; border: 1px solid #ffff00; margin-bottom: 5px; }
+
+/* DIAGNOSTICS PANEL */
+.diag-box { background: #2d1313; border: 1px solid #ff3333; padding: 10px; border-radius: 5px; margin-top: 10px; }
+.diag-title { color: #ff6666; font-weight: bold; font-size: 0.9rem; margin-bottom: 5px; text-transform: uppercase; }
+#errorReason { font-size: 1.1rem; color: #fff; font-weight: bold; }
+#healthStatus { font-size: 0.8rem; margin-top: 5px; color: #aaa; }
+
+/* RIGHT PANEL (Logs) */
+.console-container { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+.console-box { flex: 1; background: #000; border: 1px solid #333; border-radius: 6px; display: flex; flex-direction: column; overflow: hidden; }
+.box-header { background: #111; padding: 5px 10px; border-bottom: 1px solid #333; font-weight: bold; font-size: 0.85rem; color: #66fcf1; }
+.log-area { flex: 1; overflow-y: auto; padding: 10px; font-family: 'Courier New', monospace; font-size: 0.9rem; }
+
+/* LOG COLORS */
+.tx-text { color: #00ff00; }
+.rx-text { color: #00f0ff; }
+.err-text { color: #ff3333; background: #220000; padding: 2px; display: block; }
+.fec-text { color: #00ff99; font-weight: bold; }
+.sys-text { color: #ffff00; }
+
+/* INPUT AREA */
+.input-group { display: flex; gap: 10px; height: 40px; }
+input { flex: 1; padding: 0 10px; background: #1f2833; border: 1px solid #45a29e; color: #fff; border-radius: 4px; }
+</style>
+</head>
+<body>
+<header>
+<h1>LI-FI ANALYTICS V5</h1>
+<div class="btn-group">
+<button id="clearBtn" class="danger">CLEAR</button>
+<button id="connect">CONNECT USB</button>
+</div>
+</header>
+<div class="grid">
+<div class="metrics-card">
+<div id="roleIndicator">DISCONNECTED</div>
+
+<div class="metric-box">
+<div class="metric-val" id="mode">--</div>
+<div class="metric-label">ADAPTIVE MODE</div>
+</div>
+<div class="metric-box">
+<div class="metric-val" id="lux">0</div>
+<div class="metric-label">LUX (INTENSITY)</div>
+</div>
+<div class="metric-box">
+<div class="metric-val" id="snr">0</div>
+<div class="metric-label">SNR (dB)</div>
+</div>
+
+<div class="metric-box">
+<div class="metric-val" id="ber" style="color: #ff3333;">0.0000</div>
+<div class="metric-label">BIT ERROR RATE (BER)</div>
+</div>
+
+<div class="metric-box">
+<div class="metric-val" id="fec" style="color: #00ff99;">0</div>
+<div class="metric-label">FEC REPAIRED</div>
+</div>
+<div class="diag-box">
+<div class="diag-title"> ⚠  SYSTEM DIAGNOSTICS</div>
+<div id="errorReason">System Nominal</div>
+<div id="healthStatus">Waiting for data...</div>
+</div>
+</div>
+<div class="console-container">
+<div class="console-box">
+<div class="box-header">DATA STREAM (TX / RX / ERROR)</div>
+<div id="mainLog" class="log-area"></div>
+</div>
+
+<div class="input-group">
+<input type="text" id="msg" placeholder="Type message...">
+<button id="send">SEND</button>
+</div>
+</div>
+</div>
+<script>
+let port, writer;
+const connectBtn = document.getElementById('connect');
+const clearBtn = document.getElementById('clearBtn');
+const sendBtn = document.getElementById('send');
+const logArea = document.getElementById('mainLog');
+
+// UI Elements
+const elLux = document.getElementById('lux');
+const elSnr = document.getElementById('snr');
+const elBer = document.getElementById('ber');
+const elMode = document.getElementById('mode');
+const elFec = document.getElementById('fec');
+const elReason = document.getElementById('errorReason');
+const elHealth = document.getElementById('healthStatus');
+
+// CONNECTION LOGIC
+connectBtn.addEventListener('click', async () => {
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+    const textEncoder = new TextEncoderStream();
+    const writableStreamClosed = textEncoder.readable.pipeTo(port.writable);
+    writer = textEncoder.writable.getWriter();
+    logTo("USB CONNECTED...", "sys-text");
+    readLoop();
+  } catch (err) { alert("Connection Error"); }
+});
+
+clearBtn.addEventListener('click', () => logArea.innerHTML = "");
+
+// READ LOOP
+async function readLoop() {
+  const textDecoder = new TextDecoderStream();
+  const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
+  const reader = textDecoder.readable.getReader();
+  let buffer = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += value;
+    let lines = buffer.split('\n');
+    buffer = lines.pop();
+    lines.forEach(parseLine);
+  }
+}
+
+// PARSER & DIAGNOSTICS LOGIC
+function parseLine(line) {
+  line = line.trim();
+  if (!line) return;
+  
+  // 1. DATA TELEMETRY: [DATA] NAME|LUX|SNR|BER|MODE|FEC
+  if (line.startsWith("[DATA]")) {
+    const parts = line.replace("[DATA]", "").trim().split('|');
+    if (parts.length >= 6) {
+      document.getElementById('roleIndicator').innerText = parts[0];
+      let lux = parseFloat(parts[1]);
+      let snr = parseFloat(parts[2]);
+      let ber = parseFloat(parts[3]);
+      let mode = parts[4];
+      let fec = parts[5];
+      
+      // Update UI
+      elLux.innerText = lux.toFixed(1);
+      elSnr.innerText = snr.toFixed(1);
+      elBer.innerText = ber.toFixed(4);
+      elMode.innerText = mode;
+      elFec.innerText = fec;
+      
+      // --- DIAGNOSTICS ENGINE ---
+      runDiagnostics(lux, snr, ber);
+    }
+    return;
+  }
+  
+  // 2. LOGGING
+  if (line.startsWith("You Sent:")) {
+    logTo("TX: " + line.replace("You Sent:", ""), "tx-text");
+  }
+  else if (line.startsWith("RX:")) {
+    if (line.includes("[FEC FIXED]")) {
+      logTo(line, "fec-text"); // Green for repaired
+    } else {
+      logTo(line, "rx-text");  // Blue for normal
+    }
+  }
+  else if (line.includes("[ERROR]")) {
+    logTo(line, "err-text"); // Red block for errors
+  }
+  else {
+    logTo(line, "sys-text");
+  }
+}
+
+// THE BRAIN: Determines "WHY" an error happened via an active state machine
+function runDiagnostics(lux, snr, ber) {
+  const diagBox = document.querySelector('.diag-box');
+  const reasonTxt = document.getElementById('errorReason');
+  const healthTxt = document.getElementById('healthStatus');
+  
+  // Logic Tree
+  if (ber < 0.01) {
+    // Healthy Link State
+    diagBox.style.borderColor = "#00ff00";
+    diagBox.style.background = "#0f220f";
+    reasonTxt.style.color = "#00ff00";
+    reasonTxt.innerText = "LINK NOMINAL";
+    healthTxt.innerText = "Signal Clean. No action needed.";
+  }
+  else {
+    // Structural Fault Allocation
+    diagBox.style.borderColor = "#ff3333";
+    diagBox.style.background = "#2d1313";
+    reasonTxt.style.color = "#ff3333";
+    if (lux > 1000) {
+      reasonTxt.innerText = "SATURATION (Too Bright)";
+      healthTxt.innerText = "Sensor blinded by ambient light.";
+    } 
+    else if (lux < 50) {
+      reasonTxt.innerText = "WEAK SIGNAL (Too Dark)";
+      healthTxt.innerText = "LED too far or obstructed.";
+    } 
+    else if (snr < 10) {
+      reasonTxt.innerText = "HIGH NOISE FLOOR";
+      healthTxt.innerText = "Interference detected.";
+    } 
+    else {
+      reasonTxt.innerText = "PACKET COLLISION";
+      healthTxt.innerText = "Sudden obstruction or timing jitter.";
+    }
+  }
+}
+
+function logTo(msg, className) {
+  const div = document.createElement('div');
+  div.innerText = msg;
+  div.className = className;
+  div.style.marginBottom = "4px";
+  logArea.appendChild(div);
+  logArea.scrollTop = logArea.scrollHeight;
+}
+
+// SEND LOGIC
+sendBtn.addEventListener('click', async () => {
+  if (!writer) return;
+  const data = document.getElementById('msg').value + "\n";
+  await writer.write(data);
+  document.getElementById('msg').value = "";
+});
+</script>
+</body>
+</html>
